@@ -21,6 +21,8 @@ DEFAULT_PROFILE = "FEVM"
 DEFAULT_WAREHOUSE_ID = "e0c50bf18fca9e7f"
 
 ACTIVE_RUNTIME_FUNCTIONS = {
+    "runtime_triage_intake",
+    "runtime_query_pubmed",
     "runtime_get_patient_history",
     "runtime_get_recent_test_audit",
     "runtime_get_test_metadata",

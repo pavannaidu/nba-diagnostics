@@ -8,14 +8,18 @@ This repo has two selectable serving targets behind one Clinical Diagnostic Supp
 2. FastAPI stages the intake in `pavan_naidu.nba.live_intake_requests` for auditability.
 3. FastAPI reads `pavan_naidu.nba.runtime_config` to advertise available targets and resolve the selected target.
 4. The selected target runs live tools in the same sequence:
+   - `runtime_triage_intake` for payload-only cohort, acuity, quality, and routing evidence
    - `runtime_get_patient_history`
    - `runtime_get_recent_test_audit`
    - Genie similar-case evidence
    - Knowledge Assistant diagnostic guidance
+   - PubMed literature lookup
    - `runtime_get_test_metadata` for the final visible action set
 5. FastAPI normalizes the selected target JSON into the stable `/api/recommendations` response.
 
 The Supervisor target is called through Databricks Model Serving Responses API. The custom target is deployed from `agent_app/` as `idexx-nba-custom-agent-${bundle.target}` and exposes Databricks Apps `/responses` through MLflow `AgentServer`.
+
+Both targets call `query_pubmed` after curated guidance for supplementary literature context. PubMed output is not patient-specific evidence, does not override duplicate suppression, and does not change the stable `/api/recommendations` response contract.
 
 ## Baseline And Evaluation Assets
 

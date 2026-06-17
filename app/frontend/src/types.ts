@@ -76,6 +76,13 @@ export type EvidenceSource = {
   source_type: string;
   source_label: string;
   summary: string;
+  links?: EvidenceSourceLink[];
+};
+
+export type EvidenceSourceLink = {
+  label: string;
+  url: string;
+  pmid?: string | null;
 };
 
 export type EvidenceView = {
@@ -83,6 +90,7 @@ export type EvidenceView = {
   eyebrow: string;
   title: string;
   points: string[];
+  links: EvidenceSourceLink[];
 };
 
 export type TraceStep = {

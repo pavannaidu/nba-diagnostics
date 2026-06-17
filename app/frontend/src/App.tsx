@@ -5,6 +5,7 @@ import type {
   AgentTarget,
   EditableVisitInput,
   EvidenceSource,
+  EvidenceSourceLink,
   EvidenceView,
   HealthResponse,
   PanelKey,
@@ -51,6 +52,7 @@ const EVIDENCE_SOURCE_LABELS: Record<string, string> = {
   test_metadata: "Test metadata",
   similar_case_genie: "Similar cases",
   diagnostic_guidance_ka: "Diagnostic guidance",
+  query_pubmed: "PubMed literature",
 };
 
 const BOOLEAN_FIELD_LABELS: Array<[keyof EditableVisitInput, string]> = [
@@ -309,6 +311,17 @@ function parseDuplicateAuditPoints(summary: string): string[] {
   return splitNarrativePoints(cleaned, 3);
 }
 
+function formatEvidenceLinkLabel(link: EvidenceSourceLink): string {
+  const label = cleanClinicalText(link.label);
+  if (label) {
+    return label;
+  }
+  if (link.pmid) {
+    return `PMID ${link.pmid}`;
+  }
+  return "PubMed article";
+}
+
 function buildEvidenceViews(sources: EvidenceSource[]): EvidenceView[] {
   return sources
     .map((source, index) => {
@@ -330,9 +343,10 @@ function buildEvidenceViews(sources: EvidenceSource[]): EvidenceView[] {
         eyebrow,
         title,
         points,
+        links: source.links ?? [],
       };
     })
-    .filter((source) => source.points.length > 0);
+    .filter((source) => source.points.length > 0 || source.links.length > 0);
 }
 
 function CollapsedPanelRail({
@@ -1212,9 +1226,24 @@ export default function App() {
                                         <li key={point}>{point}</li>
                                       ))}
                                     </ul>
-                                  ) : (
+                                  ) : source.points.length === 1 ? (
                                     <p className="evidence-note">{source.points[0]}</p>
-                                  )}
+                                  ) : null}
+                                  {source.links.length > 0 ? (
+                                    <div className="evidence-link-list">
+                                      {source.links.map((link) => (
+                                        <a
+                                          key={`${link.url}-${link.pmid ?? link.label}`}
+                                          className="evidence-link"
+                                          href={link.url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                        >
+                                          {formatEvidenceLinkLabel(link)}
+                                        </a>
+                                      ))}
+                                    </div>
+                                  ) : null}
                                 </article>
                               ))}
                             </div>

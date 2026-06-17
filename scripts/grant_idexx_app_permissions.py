@@ -25,6 +25,11 @@ RUNTIME_VIEWS = [
     "visit_case_packet_gold",
 ]
 UC_FUNCTIONS = [
+    "runtime_triage_intake",
+    "runtime_query_pubmed",
+    "runtime_get_patient_history",
+    "runtime_get_recent_test_audit",
+    "runtime_get_test_metadata",
     "get_visit_packet",
     "get_visit_candidate_diagnostics",
     "get_cohort_recommendation_summary",

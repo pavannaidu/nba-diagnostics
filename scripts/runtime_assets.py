@@ -114,10 +114,10 @@ SUPERVISOR_EXAMPLE_CASES = [
             ],
         },
         "guidelines": (
-            "Behave exactly like the app runtime: call get_patient_history and get_recent_test_audit with the full payload_json, "
-            "then similar_case_genie, diagnostic_guidance_ka, and get_test_metadata for selected codes. Prefer one renal/urinary action "
+            "Behave exactly like the app runtime: call triage_intake, get_patient_history, and get_recent_test_audit with the full payload_json, "
+            "then similar_case_genie, diagnostic_guidance_ka, query_pubmed, and get_test_metadata for selected codes. Prefer one renal/urinary action "
             "supported by history, duplicate audit, Genie, and KA. Return JSON only with summary, 2-4 reasons, 3-5 evidence_chips, "
-            "at most 3 why_not_selected alternatives, and no scores."
+            "at most 3 why_not_selected alternatives, and no scores. Cite only PubMed PMIDs returned by query_pubmed."
         ),
     },
     {
@@ -312,8 +312,8 @@ SUPERVISOR_EXAMPLE_CASES = [
             ],
         },
         "guidelines": (
-            "Unknown patient history should not block a recommendation if the current intake is sufficient. Still call get_patient_history and duplicate audit, "
-            "then use Genie and KA to choose one GI-oriented action or abstain. Do not invent longitudinal history."
+            "Unknown patient history should not block a recommendation if the current intake is sufficient. Still call triage_intake, get_patient_history, and duplicate audit, "
+            "then use Genie, KA, and query_pubmed to choose one GI-oriented action or abstain. Do not invent longitudinal history or PubMed citations."
         ),
     },
 ]
@@ -325,10 +325,12 @@ SUPERVISOR_READ_TIMEOUT_SECONDS = int(
 )
 
 TOOL_IDS = {
+    "intake_triage": "triage_intake",
     "patient_history": "get_patient_history",
     "recent_test_audit": "get_recent_test_audit",
     "similar_case_genie": "similar_case_genie",
     "diagnostic_guidance_ka": "diagnostic_guidance_ka",
+    "query_pubmed": "query_pubmed",
     "test_metadata": "get_test_metadata",
 }
 
@@ -345,6 +347,8 @@ RUNTIME_VIEWS = [
     "visit_case_packet_gold",
 ]
 RUNTIME_FUNCTIONS = [
+    "runtime_triage_intake",
+    "runtime_query_pubmed",
     "runtime_get_patient_history",
     "runtime_get_recent_test_audit",
     "runtime_get_test_metadata",
@@ -407,15 +411,21 @@ Use this intake payload as the source of truth:
 {payload_json}
 
 Use the attached tools in this sequence:
-1. get_patient_history with payload_json set to the full intake payload JSON string
-2. get_recent_test_audit with payload_json set to the full intake payload JSON string
-3. similar_case_genie
-4. diagnostic_guidance_ka
-5. get_test_metadata only after selecting the primary action and any visible alternatives, using a JSON array string of the visible test codes
+1. triage_intake with payload_json set to the full intake payload JSON string
+2. get_patient_history with payload_json set to the full intake payload JSON string
+3. get_recent_test_audit with payload_json set to the full intake payload JSON string
+4. similar_case_genie
+5. diagnostic_guidance_ka
+6. query_pubmed with a concise veterinary literature query, max_results set to 3, and min_publication_year set to 2018
+7. get_test_metadata only after selecting the primary action and any visible alternatives, using a JSON array string of the visible test codes
 
+Use triage output for derived cohort, acuity, active signals, missing fields, quality flags, and routing notes.
 Use patient history and recent duplicate-test audit as hard constraints.
 Use Genie for structured similar-case and cohort evidence.
 Use the knowledge assistant for diagnostic workflow guidance, repeat-test cautions, and abstain conditions.
+Use PubMed only as supplementary literature context. Do not treat PubMed as patient-specific evidence or use it to override duplicate-test suppression.
+When mentioning PubMed, cite only PMIDs returned by query_pubmed. Do not invent PubMed citations, URLs, or markdown links.
+If query_pubmed returns zero articles, say PubMed returned no matching records or omit PubMed from evidence_sources.
 
 Return valid JSON only with:
 - visit_summary {{ derived_cohort }}
@@ -884,14 +894,20 @@ def build_supervisor_instructions() -> str:
     return (
         "You answer one question: for the current dog visit intake, what diagnostic action should we recommend next? "
         "Always orchestrate the attached tools in this sequence: "
-        "1) get_patient_history using the full intake payload serialized as a JSON string, "
-        "2) get_recent_test_audit using the full intake payload serialized as a JSON string, "
-        "3) similar_case_genie, "
-        "4) diagnostic_guidance_ka, "
-        "5) get_test_metadata only after you have chosen the primary action and the visible alternatives, passing a JSON array string of the visible test codes. "
+        "1) triage_intake using the full intake payload serialized as a JSON string, "
+        "2) get_patient_history using the full intake payload serialized as a JSON string, "
+        "3) get_recent_test_audit using the full intake payload serialized as a JSON string, "
+        "4) similar_case_genie, "
+        "5) diagnostic_guidance_ka, "
+        "6) query_pubmed with a concise veterinary literature query, max_results set to 3, and min_publication_year set to 2018, "
+        "7) get_test_metadata only after you have chosen the primary action and the visible alternatives, passing a JSON array string of the visible test codes. "
+        "Use triage output for derived cohort, acuity, active signals, missing fields, quality flags, and routing notes. "
         "Use patient history and duplicate-test audit as hard constraints. "
         "Use Genie for structured similar-case and cohort evidence. "
         "Use the knowledge assistant for guidance, repeat-test cautions, and abstain conditions. "
+        "Use PubMed only as supplementary literature context, not as patient-specific evidence and not to override duplicate-test suppression. "
+        "When mentioning PubMed, cite only PMIDs returned by query_pubmed. Do not invent PubMed citations, URLs, or markdown links. "
+        "If query_pubmed returns zero articles, say PubMed returned no matching records or omit PubMed from evidence_sources. "
         "If no specific diagnostic is sufficiently supported, abstain instead of forcing an action. "
         "Return valid JSON only with these fields: "
         "visit_summary { derived_cohort }, "
@@ -955,6 +971,14 @@ def ensure_supervisor_agent(
 
     tool_specs = [
         {
+            "tool_id": TOOL_IDS["intake_triage"],
+            "body": {
+                "description": "Triage editable intake JSON into derived cohort, acuity, active signals, missing fields, quality flags, and routing notes.",
+                "tool_type": "uc_function",
+                "uc_function": {"name": f"{catalog}.{schema}.runtime_triage_intake"},
+            },
+        },
+        {
             "tool_id": TOOL_IDS["patient_history"],
             "body": {
                 "description": "Fetch compact longitudinal patient history using the full intake payload JSON string.",
@@ -984,6 +1008,14 @@ def ensure_supervisor_agent(
                 "description": "Retrieve diagnostic workflow guidance and repeat-test cautions from curated dog guidance documents.",
                 "tool_type": "knowledge_assistant",
                 "knowledge_assistant": {"knowledge_assistant_id": knowledge_assistant_id},
+            },
+        },
+        {
+            "tool_id": TOOL_IDS["query_pubmed"],
+            "body": {
+                "description": "Query PubMed for compact supplementary veterinary literature context. Returns unavailable JSON instead of raising when PubMed is unavailable.",
+                "tool_type": "uc_function",
+                "uc_function": {"name": f"{catalog}.{schema}.runtime_query_pubmed"},
             },
         },
         {
@@ -1344,11 +1376,21 @@ Use this intake payload as the source of truth:
 {payload_json}
 
 Use the attached tools in this sequence:
-1. get_patient_history with payload_json set to the full intake payload JSON string
-2. get_recent_test_audit with payload_json set to the full intake payload JSON string
-3. similar_case_genie
-4. diagnostic_guidance_ka
-5. get_test_metadata after selecting the primary action and visible alternatives, using a JSON array string of the visible test codes
+1. triage_intake with payload_json set to the full intake payload JSON string
+2. get_patient_history with payload_json set to the full intake payload JSON string
+3. get_recent_test_audit with payload_json set to the full intake payload JSON string
+4. similar_case_genie
+5. diagnostic_guidance_ka
+6. query_pubmed with a concise veterinary literature query, max_results set to 3, and min_publication_year set to 2018
+7. get_test_metadata after selecting the primary action and visible alternatives, using a JSON array string of the visible test codes
+
+Use triage output for derived cohort, acuity, active signals, missing fields, quality flags, and routing notes.
+Use patient history and recent duplicate-test audit as hard constraints.
+Use Genie for structured similar-case and cohort evidence.
+Use the knowledge assistant for diagnostic workflow guidance, repeat-test cautions, and abstain conditions.
+Use PubMed only as supplementary literature context. Do not treat PubMed as patient-specific evidence or use it to override duplicate-test suppression.
+When mentioning PubMed, cite only PMIDs returned by query_pubmed. Do not invent PubMed citations, URLs, or markdown links.
+If query_pubmed returns zero articles, say PubMed returned no matching records or omit PubMed from evidence_sources.
 
 Return valid JSON only with:
 - visit_summary {{ derived_cohort }}

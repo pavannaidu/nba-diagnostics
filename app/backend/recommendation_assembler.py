@@ -459,12 +459,123 @@ class RecommendationAssembler:
             )
         return suppressed[:3]
 
+    def clean_scalar_text(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return self.clean_text(value)
+        if isinstance(value, (int, float)):
+            return str(value)
+        return None
+
+    def parse_jsonish(self, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        current: Any = value
+        for _ in range(2):
+            if not isinstance(current, str):
+                return current
+            parsed = self.clean_text(current)
+            if not parsed:
+                return current
+            try:
+                current = json.loads(parsed)
+            except json.JSONDecodeError:
+                return current
+        return current
+
+    def unwrap_tool_scalar(self, value: Any) -> Any:
+        current = self.parse_jsonish(value)
+        for _ in range(4):
+            current = self.parse_jsonish(current)
+            if not isinstance(current, dict):
+                return current
+
+            rows = current.get("rows")
+            if isinstance(rows, list) and rows and isinstance(rows[0], list) and rows[0]:
+                current = rows[0][0]
+                continue
+
+            data_array = current.get("result", {}).get("data_array")
+            if isinstance(data_array, list) and data_array and isinstance(data_array[0], list) and data_array[0]:
+                current = data_array[0][0]
+                continue
+
+            if set(current.keys()) <= {"payload"} and "payload" in current:
+                current = current["payload"]
+                continue
+
+            return current
+        return current
+
+    def pubmed_tool_payload(self, parsed_response: dict[str, Any]) -> dict[str, Any] | None:
+        tool_output = (parsed_response.get("tool_outputs") or {}).get("query_pubmed")
+        if not isinstance(tool_output, dict):
+            return None
+        payload = self.unwrap_tool_scalar(tool_output.get("payload"))
+        return payload if isinstance(payload, dict) else None
+
+    def build_pubmed_links(self, parsed_response: dict[str, Any]) -> list[dict[str, str]]:
+        pubmed_payload = self.pubmed_tool_payload(parsed_response)
+        if pubmed_payload is None:
+            return []
+        articles = self.unwrap_tool_scalar(pubmed_payload.get("articles"))
+        if not isinstance(articles, list):
+            return []
+
+        links: list[dict[str, str]] = []
+        seen_urls: set[str] = set()
+        for raw_article in articles:
+            article = self.unwrap_tool_scalar(raw_article)
+            if not isinstance(article, dict):
+                continue
+            pmid = self.clean_scalar_text(article.get("pmid"))
+            url = self.clean_scalar_text(article.get("pubmed_url")) or self.clean_scalar_text(article.get("url"))
+            if not url and pmid:
+                url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+            if not url or url in seen_urls:
+                continue
+            label = (
+                self.short_sentence(article.get("title"), max_length=120)
+                or self.short_sentence(article.get("label"), max_length=120)
+                or (f"PMID {pmid}" if pmid else "PubMed article")
+            )
+            link = {"label": label, "url": url}
+            if pmid:
+                link["pmid"] = pmid
+            links.append(link)
+            seen_urls.add(url)
+        return links[:5]
+
+    def build_pubmed_summary(self, parsed_response: dict[str, Any]) -> str:
+        pubmed_payload = self.pubmed_tool_payload(parsed_response)
+        if pubmed_payload is None:
+            return "PubMed literature lookup returned article links."
+        returned = pubmed_payload.get("returned")
+        query = self.clean_scalar_text(pubmed_payload.get("query"))
+        if isinstance(returned, str):
+            try:
+                returned = int(returned)
+            except ValueError:
+                pass
+        if isinstance(returned, int) and query:
+            return f"PubMed returned {returned} article(s) for {query}."
+        if isinstance(returned, int):
+            return f"PubMed returned {returned} article(s)."
+        return "PubMed literature lookup returned article links."
+
+    def is_pubmed_source(self, source: dict[str, Any]) -> bool:
+        source_type = str(source.get("source_type") or "").lower()
+        source_label = str(source.get("source_label") or "").lower()
+        return source_type in {"query_pubmed", "pubmed"} or "pubmed" in source_label
+
     def build_evidence_sources(
         self,
         assistant_payload: dict[str, Any],
         history_context: dict[str, Any],
         parsed_response: dict[str, Any],
     ) -> list[dict[str, Any]]:
+        pubmed_links = self.build_pubmed_links(parsed_response)
         payload_sources = assistant_payload.get("evidence_sources")
         if isinstance(payload_sources, list):
             normalized = [
@@ -472,17 +583,34 @@ class RecommendationAssembler:
                     "source_type": item.get("source_type") or "runtime_evidence",
                     "source_label": item.get("source_label") or "Runtime evidence",
                     "summary": item.get("summary") or "Evidence source returned without a summary.",
+                    "links": [],
                 }
                 for item in payload_sources
                 if isinstance(item, dict)
             ]
             if normalized:
+                pubmed_source_found = False
+                if pubmed_links:
+                    for source in normalized:
+                        if self.is_pubmed_source(source):
+                            source["links"] = pubmed_links
+                            pubmed_source_found = True
+                            break
+                    if not pubmed_source_found:
+                        normalized.append(
+                            {
+                                "source_type": "query_pubmed",
+                                "source_label": "PubMed literature",
+                                "summary": self.build_pubmed_summary(parsed_response),
+                                "links": pubmed_links,
+                            }
+                        )
                 return normalized
 
         tool_outputs = parsed_response.get("tool_outputs") or {}
         genie_preview = summarize_output_preview(tool_outputs.get("similar_case_genie", {}).get("payload"))
         guidance_preview = summarize_output_preview(tool_outputs.get("diagnostic_guidance_ka", {}).get("payload"))
-        return [
+        sources = [
             {
                 "source_type": "patient_history",
                 "source_label": "Patient history",
@@ -490,18 +618,31 @@ class RecommendationAssembler:
                     f"{history_context['prior_visit_count']} prior visit(s); "
                     f"{history_context['prior_diagnostic_summary']}"
                 ),
+                "links": [],
             },
             {
                 "source_type": "similar_case_genie",
                 "source_label": "Structured similar-case evidence",
                 "summary": genie_preview or "Structured evidence tool did not return a readable preview.",
+                "links": [],
             },
             {
                 "source_type": "diagnostic_guidance_ka",
                 "source_label": "Diagnostic guidance",
                 "summary": guidance_preview or "Guidance tool did not return a readable preview.",
+                "links": [],
             },
         ]
+        if pubmed_links:
+            sources.append(
+                {
+                    "source_type": "query_pubmed",
+                    "source_label": "PubMed literature",
+                    "summary": self.build_pubmed_summary(parsed_response),
+                    "links": pubmed_links,
+                }
+            )
+        return sources
 
     def build_completed_result(
         self,

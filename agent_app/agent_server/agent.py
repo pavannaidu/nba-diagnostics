@@ -25,10 +25,12 @@ from agent_server.utils import get_session_id, process_agent_stream_events
 
 LOGGER = logging.getLogger(__name__)
 TOOL_ORDER = [
+    "triage_intake",
     "get_patient_history",
     "get_recent_test_audit",
     "similar_case_genie",
     "diagnostic_guidance_ka",
+    "query_pubmed",
     "get_test_metadata",
 ]
 DEFAULT_CUSTOM_AGENT_MODEL_ID = "databricks-claude-sonnet-4-5"
@@ -103,6 +105,170 @@ def maybe_json(value: Any) -> Any:
         return json.loads(value)
     except json.JSONDecodeError:
         return value
+
+
+def is_present(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip() != ""
+    return True
+
+
+def is_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "t", "1", "yes", "y"}
+    return bool(value)
+
+
+def clean_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def number_value(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def triage_intake_payload(payload_json: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(payload_json or "{}")
+    except json.JSONDecodeError:
+        return {
+            "derived_cohort": "unknown",
+            "active_signals": [],
+            "signal_count": 0,
+            "acuity": "unknown",
+            "missing_fields": ["payload_json"],
+            "quality_flags": ["invalid_json"],
+            "routing_notes": [
+                "Intake JSON could not be parsed. Request structured intake before recommending."
+            ],
+        }
+
+    if not isinstance(payload, dict):
+        payload = {}
+
+    active_signals: list[str] = []
+    boolean_signal_fields = [
+        "vomiting",
+        "diarrhea",
+        "urinary_accidents",
+        "straining_to_urinate",
+        "increased_thirst",
+        "increased_hunger",
+        "lethargy",
+        "recent_diet_change",
+        "previous_same_issue",
+    ]
+    for field_name in boolean_signal_fields:
+        if is_truthy(payload.get(field_name)):
+            active_signals.append(field_name)
+
+    appetite_change = clean_text(payload.get("appetite_change")).lower()
+    if appetite_change and appetite_change not in {"stable", "normal", "unchanged", "none"}:
+        active_signals.append("appetite_change")
+
+    weight_change_pct = number_value(payload.get("weight_change_pct"))
+    if weight_change_pct is not None and abs(weight_change_pct) >= 2:
+        active_signals.append("weight_change")
+
+    missing_fields = [
+        field_name
+        for field_name in ("patient_id", "as_of_ts", "presenting_complaint", "severity")
+        if not is_present(payload.get(field_name))
+    ]
+
+    owner_note = clean_text(payload.get("owner_note"))
+    clinician_note = clean_text(payload.get("clinician_note"))
+    if not active_signals and not owner_note and not clinician_note:
+        missing_fields.append("clinical_context")
+
+    quality_flags = [f"missing_{field_name}" for field_name in missing_fields]
+    if not payload:
+        quality_flags.append("empty_payload")
+    if "clinical_context" in missing_fields:
+        quality_flags.append("no_clinical_context")
+    if not is_present(payload.get("seed_visit_id")):
+        quality_flags.append("fresh_visit")
+    if payload.get("recent_test_overrides"):
+        quality_flags.append("recent_overrides_present")
+
+    allowed_cohorts = {
+        "renal_urinary",
+        "gi",
+        "endocrine_metabolic",
+        "wellness",
+        "general",
+    }
+    cohort_hint = clean_text(payload.get("cohort_hint")).lower()
+    if cohort_hint in allowed_cohorts:
+        derived_cohort = cohort_hint
+    elif (
+        is_truthy(payload.get("increased_thirst"))
+        and is_truthy(payload.get("increased_hunger"))
+    ) or "weight_change" in active_signals:
+        derived_cohort = "endocrine_metabolic"
+    elif any(
+        is_truthy(payload.get(field_name))
+        for field_name in ("urinary_accidents", "straining_to_urinate", "increased_thirst")
+    ):
+        derived_cohort = "renal_urinary"
+    elif any(
+        is_truthy(payload.get(field_name))
+        for field_name in ("vomiting", "diarrhea", "recent_diet_change")
+    ):
+        derived_cohort = "gi"
+    elif not active_signals:
+        derived_cohort = "wellness"
+    else:
+        derived_cohort = "general"
+
+    severity = clean_text(payload.get("severity")).lower()
+    urgency = clean_text(payload.get("urgency_level")).lower()
+    signal_count = len(active_signals)
+    high_severity = severity in {"high", "severe", "critical", "emergency"}
+    high_urgency = urgency in {"urgent", "emergency", "immediate", "stat"}
+    moderate_severity = severity in {"moderate", "medium"}
+    moderate_urgency = urgency in {"soon", "priority", "expedited"}
+    if high_severity or high_urgency or (is_truthy(payload.get("lethargy")) and signal_count >= 3):
+        acuity = "high"
+    elif moderate_severity or moderate_urgency or signal_count >= 2:
+        acuity = "moderate"
+    else:
+        acuity = "low"
+
+    routing_notes = [f"Use {derived_cohort.replace('_', '/')} guidance."]
+    if missing_fields:
+        routing_notes.append("Missing intake fields: " + ", ".join(missing_fields) + ".")
+    if "clinical_context" in missing_fields:
+        routing_notes.append(
+            "Insufficient intake detail. Consider abstain or request more context if evidence is weak."
+        )
+    if payload.get("recent_test_overrides"):
+        routing_notes.append("Use recent-test audit as a hard duplicate constraint.")
+    if acuity == "high":
+        routing_notes.append("Prioritize urgent or high-acuity diagnostic guidance.")
+
+    return {
+        "derived_cohort": derived_cohort,
+        "active_signals": active_signals,
+        "signal_count": signal_count,
+        "acuity": acuity,
+        "missing_fields": missing_fields,
+        "quality_flags": quality_flags,
+        "routing_notes": routing_notes,
+    }
 
 
 @lru_cache(maxsize=1)
@@ -355,6 +521,16 @@ def query_genie_space(question: str, *, timeout_seconds: int = 120) -> dict[str,
 
 
 @function_tool
+def triage_intake(payload_json: str) -> str:
+    """Triage editable intake JSON into cohort, acuity, active signals, missing fields, and routing notes."""
+    return run_traced_tool(
+        "triage_intake",
+        {"payload_json": payload_json},
+        lambda: json.dumps(triage_intake_payload(payload_json), sort_keys=True),
+    )
+
+
+@function_tool
 def get_patient_history(payload_json: str) -> str:
     """Fetch compact longitudinal patient history using the full intake payload JSON string."""
     catalog = os.getenv("DATABRICKS_CATALOG", "pavan_naidu")
@@ -415,6 +591,41 @@ def diagnostic_guidance_ka(question: str) -> str:
 
 
 @function_tool
+def query_pubmed(
+    search_query: str,
+    max_results: int = 5,
+    min_publication_year: int = 0,
+) -> str:
+    """Query the governed PubMed UC function for supplementary literature context."""
+    catalog = os.getenv("DATABRICKS_CATALOG", "pavan_naidu")
+    schema = os.getenv("DATABRICKS_SCHEMA", "nba")
+    try:
+        result_limit = max(1, min(int(max_results), 5))
+    except (TypeError, ValueError):
+        result_limit = 5
+    try:
+        min_year = int(min_publication_year)
+    except (TypeError, ValueError):
+        min_year = 0
+    cleaned_query = str(search_query or "")
+    return run_traced_tool(
+        "query_pubmed",
+        {
+            "search_query": cleaned_query,
+            "max_results": result_limit,
+            "min_publication_year": min_year,
+        },
+        lambda: json.dumps(
+            fetch_json_scalar(
+                f"SELECT {catalog}.{schema}.runtime_query_pubmed("
+                f"{quote_sql(cleaned_query)}, {result_limit}, {min_year})"
+            ),
+            default=str,
+        ),
+    )
+
+
+@function_tool
 def get_test_metadata(test_codes: str) -> str:
     """Fetch diagnostic catalog metadata using a JSON array string of selected and visible test codes."""
     catalog = os.getenv("DATABRICKS_CATALOG", "pavan_naidu")
@@ -435,16 +646,22 @@ def build_agent_instructions() -> str:
     return """
 You answer one question: for the current dog visit intake, what diagnostic action should we recommend next?
 
-Always use the attached tools in this exact sequence:
-1. get_patient_history with payload_json set to the full intake payload JSON string
-2. get_recent_test_audit with payload_json set to the full intake payload JSON string
-3. similar_case_genie
-4. diagnostic_guidance_ka
-5. get_test_metadata only after selecting the primary action and any visible alternatives, using a JSON array string of the visible test codes
+Always use the core diagnostic tools in this exact sequence:
+1. triage_intake with payload_json set to the full intake payload JSON string
+2. get_patient_history with payload_json set to the full intake payload JSON string
+3. get_recent_test_audit with payload_json set to the full intake payload JSON string
+4. similar_case_genie
+5. diagnostic_guidance_ka
+6. query_pubmed with a concise veterinary literature query, max_results set to 3, and min_publication_year set to 2018
+7. get_test_metadata only after selecting the primary action and any visible alternatives, using a JSON array string of the visible test codes
 
+Use triage output for derived cohort, acuity, active signals, missing fields, quality flags, and routing notes.
 Use patient history and recent duplicate-test audit as hard constraints.
 Use Genie for structured similar-case and cohort evidence.
 Use the knowledge assistant for diagnostic workflow guidance, repeat-test cautions, and abstain conditions.
+Use PubMed only as supplementary literature context. Do not treat PubMed as patient-specific evidence or use it to override duplicate-test suppression.
+When mentioning PubMed, cite only PMIDs returned by query_pubmed. Do not invent PubMed citations, URLs, or markdown links.
+If query_pubmed returns zero articles, say PubMed returned no matching records or omit PubMed from evidence_sources.
 
 Return valid JSON only with:
 - visit_summary { derived_cohort }
@@ -469,10 +686,12 @@ def create_agent(model_id: str | None = None) -> Agent:
         instructions=build_agent_instructions(),
         model=model_id or default_custom_agent_model_id(),
         tools=[
+            triage_intake,
             get_patient_history,
             get_recent_test_audit,
             similar_case_genie,
             diagnostic_guidance_ka,
+            query_pubmed,
             get_test_metadata,
         ],
     )

@@ -7,12 +7,15 @@ Dog-only synthetic data and a Databricks App for request-time diagnostic next-st
 - `GET /api/sample-cases` loads reference intakes from synthetic gold views.
 - `GET /api/health` advertises selectable recommendation targets from `pavan_naidu.nba.runtime_config`.
 - `POST /api/recommendations` submits the edited intake to the selected target, defaulting to the Supervisor endpoint.
-- Runtime UC tools provide patient facts and hard guardrails:
+- Runtime UC tools provide patient facts, supplementary literature, and hard guardrails:
+  - `runtime_triage_intake`
+  - `runtime_query_pubmed`
   - `runtime_get_patient_history`
   - `runtime_get_recent_test_audit`
   - `runtime_get_test_metadata`
-- Genie and Knowledge Assistant provide similar-case evidence and curated diagnostic guidance.
-- The custom agent exposes `/responses` from `agent_app/` using MLflow `AgentServer`; it uses the same tool names, prompt contract, and JSON response shape as the Supervisor.
+- Genie and Knowledge Assistant provide similar-case evidence and curated diagnostic guidance; PubMed adds supplementary literature context.
+- The custom agent exposes `/responses` from `agent_app/` using MLflow `AgentServer`; it uses the same core tool names, prompt contract, and JSON response shape as the Supervisor.
+- Both targets call `query_pubmed` during runtime. PubMed failures return structured unavailable payloads and do not block recommendations.
 
 ## What Is Baseline
 

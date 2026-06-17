@@ -144,10 +144,17 @@ class ConsideredActionOut(BaseModel):
     suppression_window_days: int | None = None
 
 
+class EvidenceSourceLinkOut(BaseModel):
+    label: str
+    url: str
+    pmid: str | None = None
+
+
 class EvidenceSourceOut(BaseModel):
     source_type: str
     source_label: str
     summary: str
+    links: list[EvidenceSourceLinkOut] = Field(default_factory=list)
 
 
 class TraceStepOut(BaseModel):

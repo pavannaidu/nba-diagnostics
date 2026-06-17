@@ -58,6 +58,8 @@ def require_tool_output(
     parsed_payload: dict[str, object],
     tool_name: str,
     label: str,
+    *,
+    allow_error_text: bool = False,
 ) -> dict[str, object]:
     tool_outputs = parsed_payload.get("tool_outputs")
     if not isinstance(tool_outputs, dict):
@@ -68,8 +70,33 @@ def require_tool_output(
     payload = output.get("payload")
     if payload is None or payload_text(payload).strip() == "":
         raise RuntimeError(f"{label} returned an empty payload.")
-    assert_no_error_text(label, payload)
+    if not allow_error_text:
+        assert_no_error_text(label, payload)
     return output
+
+
+def validate_pubmed_payload(label: str, payload: object) -> None:
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{label} did not return parseable JSON.")
+    status = payload.get("status")
+    if not isinstance(status, str) or not status:
+        raise RuntimeError(f"{label} did not include a status.")
+    articles = payload.get("articles")
+    error = payload.get("error")
+    if not isinstance(articles, list) and not isinstance(error, dict):
+        raise RuntimeError(f"{label} must include articles or a structured error.")
+
+
+def require_tool_order(
+    label: str,
+    tool_call_sequence: list[str],
+    earlier_tool: str,
+    later_tool: str,
+) -> None:
+    if earlier_tool not in tool_call_sequence or later_tool not in tool_call_sequence:
+        return
+    if tool_call_sequence.index(earlier_tool) > tool_call_sequence.index(later_tool):
+        raise RuntimeError(f"{label} called {later_tool} before {earlier_tool}.")
 
 
 def call_app_responses(client, app_url: str, prompt: str) -> dict[str, object]:
@@ -116,7 +143,12 @@ def validate_recommendation_response(
                 raise RuntimeError(
                     f"{label} recommendation is missing required field {field_name!r}."
                 )
-    tool_call_names = {call.get("name", "") for call in parsed.get("tool_calls", [])}
+    tool_call_sequence = [call.get("name", "") for call in parsed.get("tool_calls", [])]
+    tool_call_names = set(tool_call_sequence)
+    if not tool_call_sequence or tool_call_sequence[0] != TOOL_IDS["intake_triage"]:
+        raise RuntimeError(f"{label} did not call triage_intake first during smoke test.")
+    if TOOL_IDS["intake_triage"] not in tool_call_names:
+        raise RuntimeError(f"{label} did not call triage_intake during smoke test.")
     if TOOL_IDS["patient_history"] not in tool_call_names:
         raise RuntimeError(f"{label} did not call get_patient_history during smoke test.")
     if TOOL_IDS["recent_test_audit"] not in tool_call_names:
@@ -125,6 +157,29 @@ def validate_recommendation_response(
         raise RuntimeError(f"{label} did not call the Genie evidence tool during smoke test.")
     if TOOL_IDS["diagnostic_guidance_ka"] not in tool_call_names:
         raise RuntimeError(f"{label} did not call the guidance KA during smoke test.")
+    if TOOL_IDS["query_pubmed"] not in tool_call_names:
+        raise RuntimeError(f"{label} did not call query_pubmed during smoke test.")
+
+    require_tool_order(
+        label,
+        tool_call_sequence,
+        TOOL_IDS["diagnostic_guidance_ka"],
+        TOOL_IDS["query_pubmed"],
+    )
+    require_tool_order(
+        label,
+        tool_call_sequence,
+        TOOL_IDS["query_pubmed"],
+        TOOL_IDS["test_metadata"],
+    )
+
+    triage_output = require_tool_output(
+        parsed,
+        TOOL_IDS["intake_triage"],
+        f"{label} triage_intake",
+    )
+    if not isinstance(triage_output.get("payload"), dict):
+        raise RuntimeError(f"{label} triage_intake did not return parseable JSON.")
 
     history_output = require_tool_output(
         parsed,
@@ -141,6 +196,14 @@ def validate_recommendation_response(
     )
     if not isinstance(recent_audit_output.get("payload"), list):
         raise RuntimeError(f"{label} get_recent_test_audit did not return a JSON array.")
+
+    pubmed_output = require_tool_output(
+        parsed,
+        TOOL_IDS["query_pubmed"],
+        f"{label} query_pubmed",
+        allow_error_text=True,
+    )
+    validate_pubmed_payload(f"{label} query_pubmed", pubmed_output.get("payload"))
 
     return recommendation, tool_call_names
 
@@ -190,6 +253,30 @@ def main() -> int:
         args.schema,
         intake,
     )
+    direct_triage = fetch_scalar(
+        client,
+        args.warehouse_id,
+        (
+            f"SELECT {args.catalog}.{args.schema}.runtime_triage_intake("
+            f"{quote_sql(payload_json)})"
+        ),
+    )
+    assert_no_error_text("Direct runtime_triage_intake", direct_triage)
+    parsed_direct_triage = maybe_json(direct_triage)
+    if not isinstance(parsed_direct_triage, dict):
+        raise RuntimeError("Direct runtime_triage_intake did not return parseable JSON.")
+
+    direct_pubmed = fetch_scalar(
+        client,
+        args.warehouse_id,
+        (
+            f"SELECT {args.catalog}.{args.schema}.runtime_query_pubmed("
+            "'canine chronic kidney disease SDMA', 2, 2018)"
+        ),
+    )
+    parsed_direct_pubmed = maybe_json(direct_pubmed)
+    validate_pubmed_payload("Direct runtime_query_pubmed", parsed_direct_pubmed)
+
     direct_history = fetch_scalar(
         client,
         args.warehouse_id,
@@ -266,6 +353,8 @@ def main() -> int:
                         "custom_agent_app_url": runtime_config["custom_agent_app_url"],
                         "supervisor_tool_call_names": sorted(supervisor_tool_calls),
                         "custom_agent_tool_call_names": sorted(custom_tool_calls),
+                        "direct_triage": parsed_direct_triage,
+                        "direct_pubmed": parsed_direct_pubmed,
                         "direct_history_patient_id": parsed_direct_history.get("patient_id"),
                         "direct_genie_status": direct_genie.get("status"),
                         "supervisor_recommendation": supervisor_recommendation,

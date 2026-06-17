@@ -10,20 +10,29 @@ from .databricks_client import maybe_json_load
 
 
 TOOL_SPECS = {
+    "triage_intake": {"label": "Triage editable intake", "kind": "uc_function"},
     "get_patient_history": {"label": "Fetch longitudinal history", "kind": "uc_function"},
     "get_recent_test_audit": {"label": "Audit recent duplicate testing", "kind": "uc_function"},
     "similar_case_genie": {"label": "Retrieve similar-case evidence", "kind": "genie_space"},
     "diagnostic_guidance_ka": {"label": "Retrieve diagnostic guidance", "kind": "knowledge_assistant"},
+    "query_pubmed": {"label": "Query PubMed literature", "kind": "uc_function"},
     "get_test_metadata": {"label": "Load test metadata", "kind": "uc_function"},
 }
 
-REQUIRED_RUNTIME_OUTPUTS = ["get_patient_history", "get_recent_test_audit"]
-REQUIRED_RUNTIME_CALLS = ["similar_case_genie", "diagnostic_guidance_ka"]
+REQUIRED_RUNTIME_OUTPUTS = [
+    "triage_intake",
+    "get_patient_history",
+    "get_recent_test_audit",
+    "query_pubmed",
+]
+REQUIRED_RUNTIME_CALLS = ["similar_case_genie", "diagnostic_guidance_ka", "query_pubmed"]
 TRACE_TOOL_ORDER = [
+    "triage_intake",
     "get_patient_history",
     "get_recent_test_audit",
     "similar_case_genie",
     "diagnostic_guidance_ka",
+    "query_pubmed",
     "get_test_metadata",
 ]
 
@@ -146,15 +155,21 @@ Use this intake payload as the source of truth:
 {payload_json}
 
 Use the attached tools in this sequence:
-1. get_patient_history with payload_json set to the full intake payload JSON string
-2. get_recent_test_audit with payload_json set to the full intake payload JSON string
-3. similar_case_genie
-4. diagnostic_guidance_ka
-5. get_test_metadata only after selecting the primary action and any visible alternatives, using a JSON array string of the visible test codes
+1. triage_intake with payload_json set to the full intake payload JSON string
+2. get_patient_history with payload_json set to the full intake payload JSON string
+3. get_recent_test_audit with payload_json set to the full intake payload JSON string
+4. similar_case_genie
+5. diagnostic_guidance_ka
+6. query_pubmed with a concise veterinary literature query, max_results set to 3, and min_publication_year set to 2018
+7. get_test_metadata only after selecting the primary action and any visible alternatives, using a JSON array string of the visible test codes
 
+Use triage output for derived cohort, acuity, active signals, missing fields, quality flags, and routing notes.
 Use patient history and recent duplicate-test audit as hard constraints.
 Use Genie for structured similar-case and cohort evidence.
 Use the knowledge assistant for diagnostic workflow guidance, repeat-test cautions, and abstain conditions.
+Use PubMed only as supplementary literature context. Do not treat PubMed as patient-specific evidence or use it to override duplicate-test suppression.
+When mentioning PubMed, cite only PMIDs returned by query_pubmed. Do not invent PubMed citations, URLs, or markdown links.
+If query_pubmed returns zero articles, say PubMed returned no matching records or omit PubMed from evidence_sources.
 
 Return valid JSON only with:
 - visit_summary {{ derived_cohort }}
