@@ -1,0 +1,10 @@
+[
+  {
+    "question": "For a mature dog with increased thirst, urinary accidents, decreased appetite, and renal monitoring history, what guidance should shape the next diagnostic recommendation?",
+    "guidelines": "Use renal_urinary_workup.md and duplicate_suppression_policy.md. Explain when URINALYSIS, SDMA_CHEM17, URINE_CULTURE, or UPC_RATIO is appropriate, and call out recent-test suppression if the same test was performed recently."
+  },
+  {
+    "question": "For a dog with urinary accidents where urinalysis was completed recently, how should repeat-test guidance affect the recommendation?",
+    "guidelines": "Use renal_urinary_workup.md and duplicate_suppression_policy.md. Suppress the repeated same test inside its recency window and choose the next supported diagnostic only if patient facts justify it."
+  }
+]

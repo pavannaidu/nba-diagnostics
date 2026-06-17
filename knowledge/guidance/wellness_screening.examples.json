@@ -1,0 +1,10 @@
+[
+  {
+    "question": "For a stable routine senior dog visit with limited symptom burden, what diagnostic guidance applies?",
+    "guidelines": "Use wellness_screening.md. Favor broad preventive screening such as WELLNESS_PANEL when symptom burden is limited and no active cohort is stronger."
+  },
+  {
+    "question": "For a visit that started as wellness but now has stronger renal, GI, or endocrine symptoms, when should wellness-only diagnostics be de-prioritized?",
+    "guidelines": "Use wellness_screening.md. De-prioritize wellness-only diagnostics when current intake supports a stronger active symptomatic renal, GI, or endocrine workup."
+  }
+]

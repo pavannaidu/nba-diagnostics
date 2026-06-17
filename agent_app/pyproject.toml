@@ -1,0 +1,36 @@
+[project]
+name = "idexx-nba-custom-agent"
+version = "0.1.0"
+description = "Custom Databricks Apps ResponsesAgent for IDEXX diagnostic recommendations."
+requires-python = ">=3.11"
+dependencies = [
+    "databricks-agents>=1.9.3",
+    "databricks-openai>=0.13.0",
+    "databricks-sdk>=0.30.0",
+    "fastapi>=0.115.0",
+    "mlflow>=3.10.0",
+    "openai-agents>=0.4.1",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.25.0",
+    "python-dotenv>=1.2.1",
+    "requests>=2.32.0",
+    "uvicorn[standard]>=0.30.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent_server"]
+
+[dependency-groups]
+dev = [
+    "hatchling>=1.28.0",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[project.scripts]
+start-app = "agent_server.start_server:main"
+start-server = "agent_server.start_server:main"

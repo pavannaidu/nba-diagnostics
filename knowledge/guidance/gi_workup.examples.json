@@ -1,0 +1,10 @@
+[
+  {
+    "question": "For a dog with vomiting, diarrhea, recent diet change, and moderate severity, what GI diagnostic guidance should be used?",
+    "guidelines": "Use gi_workup.md. Prefer GI_PANEL for broad GI characterization and FECAL_PCR when diarrhea or infectious risk is prominent."
+  },
+  {
+    "question": "For a symptomatic GI visit with vomiting and diarrhea, when is fecal screening lower priority than a broader GI workup?",
+    "guidelines": "Use gi_workup.md. Explain that preventive fecal screening is lower priority when vomiting, diarrhea, chronicity, or infectious risk makes active GI characterization more important."
+  }
+]

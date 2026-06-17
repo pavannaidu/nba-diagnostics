@@ -1,0 +1,10 @@
+[
+  {
+    "question": "For a dog with increased thirst, increased hunger, and weight change, when should fructosamine be preferred?",
+    "guidelines": "Use endocrine_metabolic_workup.md. Prefer FRUCTOSAMINE when increased thirst and increased hunger suggest diabetic screening or glycemic follow-up."
+  },
+  {
+    "question": "For a dog with endocrine signs where the same endocrine monitoring test was completed recently, how should guidance affect the final recommendation?",
+    "guidelines": "Use endocrine_metabolic_workup.md and duplicate_suppression_policy.md. Do not recommend the same endocrine monitoring test inside the recent-test window unless there is a documented escalation."
+  }
+]

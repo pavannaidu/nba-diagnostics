@@ -1,0 +1,15 @@
+resources:
+  apps:
+    nba_diagnostics_app:
+      name: idexx-nba-diagnostics-${bundle.target}
+      description: "Diagnostic recommendation workspace for synthetic IDEXX dog visit data."
+      source_code_path: ../app
+      resources:
+        - name: nba-warehouse
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+        - name: custom-diagnostic-agent
+          app:
+            name: idexx-nba-custom-agent-${bundle.target}
+            permission: CAN_USE

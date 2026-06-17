@@ -1,0 +1,4 @@
+resources:
+  experiments:
+    custom_agent_experiment:
+      name: /Workspace/Users/${workspace.current_user.userName}/idexx-nba-custom-agent-${bundle.target}

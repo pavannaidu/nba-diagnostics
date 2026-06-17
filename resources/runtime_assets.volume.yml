@@ -1,0 +1,7 @@
+resources:
+  volumes:
+    runtime_guidance:
+      catalog_name: ${var.catalog}
+      schema_name: ${var.schema}
+      name: ${var.guidance_volume_name}
+      volume_type: MANAGED

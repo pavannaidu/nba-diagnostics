@@ -1,0 +1,33 @@
+bundle:
+  name: nba-diagnostics
+
+include:
+  - resources/*.yml
+
+sync:
+  include:
+    - app/static/**
+    - agent_app/**
+
+variables:
+  catalog:
+    default: pavan_naidu
+  schema:
+    default: nba
+  warehouse_id:
+    default: e0c50bf18fca9e7f
+  guidance_volume_name:
+    default: runtime_guidance
+  custom_agent_llm_endpoint:
+    default: databricks-claude-sonnet-4-5
+  jobs_spark_version:
+    default: 15.4.x-scala2.12
+  jobs_node_type_id:
+    default: i3.xlarge
+
+targets:
+  fevm:
+    default: true
+    mode: development
+    workspace:
+      profile: FEVM

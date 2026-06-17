@@ -1,0 +1,19 @@
+resources:
+  apps:
+    custom_diagnostic_agent:
+      name: idexx-nba-custom-agent-${bundle.target}
+      description: "Custom ResponsesAgent diagnostic recommendation target for synthetic IDEXX dog visit data."
+      source_code_path: ../agent_app
+      resources:
+        - name: experiment
+          experiment:
+            experiment_id: ${resources.experiments.custom_agent_experiment.id}
+            permission: CAN_MANAGE
+        - name: nba-warehouse
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+        - name: custom-agent-llm
+          serving_endpoint:
+            name: ${var.custom_agent_llm_endpoint}
+            permission: CAN_QUERY

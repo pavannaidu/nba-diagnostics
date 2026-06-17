@@ -1,0 +1,27 @@
+command:
+  - "python"
+  - "-m"
+  - "uvicorn"
+  - "app:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "8000"
+
+env:
+  - name: NBA_APP_TITLE
+    value: "Clinical Diagnostic Support"
+  - name: DATABRICKS_CATALOG
+    value: "pavan_naidu"
+  - name: DATABRICKS_SCHEMA
+    value: "nba"
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: "nba-warehouse"
+  - name: DATABRICKS_PROFILE
+    value: "FEVM"
+  - name: NBA_SAMPLE_VISIT_LIMIT
+    value: "8"
+  - name: NBA_SUPERVISOR_CONNECT_TIMEOUT_SECONDS
+    value: "15"
+  - name: NBA_SUPERVISOR_READ_TIMEOUT_SECONDS
+    value: "300"

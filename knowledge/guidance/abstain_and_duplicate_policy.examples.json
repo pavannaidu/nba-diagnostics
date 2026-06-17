@@ -1,0 +1,10 @@
+[
+  {
+    "question": "For a current visit with missing complaint, no meaningful symptom signals, and empty clinical notes, what guidance should the recommendation workflow follow?",
+    "guidelines": "Use abstain_and_needs_input_policy.md. Abstain when evidence is weak, duplicate suppression removes the obvious test, or no action is supported by both patient facts and broader guidance."
+  },
+  {
+    "question": "For an otherwise supported diagnostic that was completed recently, how should duplicate suppression be explained?",
+    "guidelines": "Use duplicate_suppression_policy.md. State the prior recency in days when available and explain that the diagnostic was not selected because the same test was performed within the recent-test window."
+  }
+]

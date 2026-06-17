@@ -1,0 +1,67 @@
+resources:
+  jobs:
+    bootstrap_runtime_assets:
+      name: idexx-bootstrap-runtime-assets-${bundle.target}
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: bootstrap_runtime_assets
+          spark_python_task:
+            python_file: ../scripts/bootstrap_runtime_assets.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --schema
+              - ${var.schema}
+              - --warehouse-id
+              - ${var.warehouse_id}
+              - --guidance-volume-name
+              - ${var.guidance_volume_name}
+              - --app-name
+              - idexx-nba-diagnostics-${bundle.target}
+              - --custom-agent-app-name
+              - idexx-nba-custom-agent-${bundle.target}
+          new_cluster:
+            spark_version: ${var.jobs_spark_version}
+            node_type_id: ${var.jobs_node_type_id}
+            num_workers: 0
+            spark_conf:
+              spark.databricks.cluster.profile: singleNode
+              spark.master: local[*]
+            custom_tags:
+              ResourceClass: SingleNode
+          libraries:
+            - pypi:
+                package: databricks-sdk>=0.30.0
+            - pypi:
+                package: requests>=2.32.0
+
+    smoke_test_runtime:
+      name: idexx-smoke-test-runtime-${bundle.target}
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: smoke_test_runtime
+          spark_python_task:
+            python_file: ../scripts/smoke_test_runtime.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --schema
+              - ${var.schema}
+              - --warehouse-id
+              - ${var.warehouse_id}
+              - --guidance-volume-name
+              - ${var.guidance_volume_name}
+          new_cluster:
+            spark_version: ${var.jobs_spark_version}
+            node_type_id: ${var.jobs_node_type_id}
+            num_workers: 0
+            spark_conf:
+              spark.databricks.cluster.profile: singleNode
+              spark.master: local[*]
+            custom_tags:
+              ResourceClass: SingleNode
+          libraries:
+            - pypi:
+                package: databricks-sdk>=0.30.0
+            - pypi:
+                package: requests>=2.32.0

@@ -1,0 +1,11 @@
+__pycache__/
+generated/
+.databricks/
+.vscode/
+mlflow.db
+app/frontend/node_modules/
+app/frontend/.vite/
+app/.venv/
+agent_app/.venv/
+app/static/index.html
+app/static/assets/
